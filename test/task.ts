@@ -24,7 +24,7 @@ describe("SimpleStorage Contract", () => {
             expect(await simpleStorage.getValue()).to.equal(200);
         });
         it("Shouldn't be able to get called by another address", async () => {
-            await expect(simpleStorage.connect(addr2).setValue(300)).to.be.revertedWith("Only owner can call this function.");
+            await expect(simpleStorage.connect(addr2).setValue(300)).to.be.revertedWith("Ownable: caller is not the owner");
             expect(await simpleStorage.getValue()).to.equal(0);
         });
     });
