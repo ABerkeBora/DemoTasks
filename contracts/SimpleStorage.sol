@@ -3,7 +3,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract SimpleStorage is Ownable{
     uint256 value;
-    constructor(){
+    constructor(uint256 newValue){
+        value=newValue;
     }
     function getValue() public view returns (uint256) {
         return value;
