@@ -1,11 +1,14 @@
 pragma solidity ^0.8.0;
 import "./SimpleStorage.sol";
-contract Proxy{
+
+contract Proxy {
     SimpleStorage simpleStorage;
-    constructor(address simpleStorageAddress){
+
+    constructor(address simpleStorageAddress) {
         simpleStorage = SimpleStorage(simpleStorageAddress);
     }
-    function runProxy(uint256 newValue) external{
+
+    function runProxy(uint256 newValue) external {
         simpleStorage.setValue(newValue);
     }
 }
