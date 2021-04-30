@@ -14,12 +14,14 @@ describe("SimpleStorage Contract", () => {
     Proxy = await ethers.getContractFactory("Proxy");
     proxy = await Proxy.deploy(simpleStorage.address);
   });
+
   describe("Setter & Getter for Value", () => {
     it("Should be able to set and get the Value correctly", async () => {
       await simpleStorage.setValue(100);
       expect(await simpleStorage.getValue()).to.equal(100);
     });
   });
+
   describe("Setter for Value is only called by owner", () => {
     it("Should be able to get called by owner", async () => {
       await simpleStorage.connect(owner).setValue(200);
@@ -90,6 +92,81 @@ describe("ERC20 Token & Another Contract", () => {
       await expect(
         another.connect(owner).transferFromContractAllowance(addr2.address, 300)
       ).to.be.revertedWith("ERC20: transfer amount exceeds allowance");
+    });
+  });
+});
+describe("Storage with Mapping", () => {
+  let StorageWithMapping, storageWithMapping, owner, addr2;
+  beforeEach(async () => {
+    StorageWithMapping = await ethers.getContractFactory("StorageWithMapping");
+    storageWithMapping = await StorageWithMapping.deploy();
+    [owner, addr2] = await ethers.getSigners();
+  });
+
+  describe("Setter & Getter with mapping", () => {
+    it("Should be able to set & get same value with same key", async () => {
+      await storageWithMapping.setValue(
+        ethers.utils.formatBytes32String("abc"),
+        100
+      );
+      expect(
+        await storageWithMapping.getValue(
+          ethers.utils.formatBytes32String("abc")
+        )
+      ).to.equal(100);
+      await storageWithMapping.setValue(
+        ethers.utils.formatBytes32String("ree"),
+        250
+      );
+      expect(
+        await storageWithMapping.getValue(
+          ethers.utils.formatBytes32String("ree")
+        )
+      ).to.equal(250);
+    });
+    it("Only owner should be able to set the value, reverting when someone else tries to set", async () => {
+      await expect(
+        storageWithMapping
+          .connect(addr2)
+          .setValue(ethers.utils.formatBytes32String("abc"), 100)
+      ).to.be.revertedWith("Only owner can call this function.");
+      expect(
+        await storageWithMapping.getValue(
+          ethers.utils.formatBytes32String("abc")
+        )
+      ).to.equal(0);
+    });
+    it("Should be able to set the same key & value pair twice", async () => {
+      await storageWithMapping.setValue(
+        ethers.utils.formatBytes32String("abc"),
+        100
+      );
+      expect(
+        await storageWithMapping.getValue(
+          ethers.utils.formatBytes32String("abc")
+        )
+      ).to.equal(100);
+      await storageWithMapping.setValue(
+        ethers.utils.formatBytes32String("abc"),
+        250
+      );
+      expect(
+        await storageWithMapping.getValue(
+          ethers.utils.formatBytes32String("abc")
+        )
+      ).to.equal(250);
+    });
+  });
+  describe("Testing & Emitting ValueSet", () => {
+    it("Emitting the Event correctly with right variables after setValue triggered", async () => {
+      await expect(
+        storageWithMapping.setValue(
+          ethers.utils.formatBytes32String("abc"),
+          100
+        )
+      )
+        .to.emit(storageWithMapping, "ValueSet")
+        .withArgs(ethers.utils.formatBytes32String("abc"), 100);
     });
   });
 });
