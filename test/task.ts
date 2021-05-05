@@ -170,3 +170,224 @@ describe("Storage with Mapping", () => {
     });
   });
 });
+describe("D Contract & Lines", () => {
+  let D, d, Token, token, Token2, token2, owner, addr2, addr3, addr4;
+  let maturityDate;
+  let expectedLineID;
+  beforeEach(async () => {
+    D = await ethers.getContractFactory("D");
+    d = await D.deploy();
+    Token = await ethers.getContractFactory("Token");
+    token = await Token.deploy();
+    Token2 = await ethers.getContractFactory("Token");
+    token2 = await Token2.deploy();
+    [owner, addr2, addr3, addr4] = await ethers.getSigners();
+    maturityDate = 2021;
+    expectedLineID = ethers.utils.solidityKeccak256(
+      ["uint256", "uint256", "uint256"],
+      [owner.address, maturityDate, token.address]
+    );
+  });
+
+  describe("Deploying Contract and openLine()", () => {
+    it("Should be able to use Openline with right inputs & emit events", async () => {
+      await expect(
+        d.openLine(
+          maturityDate,
+          token.address,
+          [addr2.address, addr3.address],
+          [100, 200]
+        )
+      )
+        .to.emit(d, "LineOpened")
+        .withArgs(expectedLineID, owner.address, addr2.address);
+
+      await expect(
+        d.openLine(
+          maturityDate,
+          token.address,
+          [addr2.address, addr3.address],
+          [100, 200]
+        )
+      )
+        .to.emit(d, "LineOpened")
+        .withArgs(expectedLineID, owner.address, addr3.address);
+
+      //if balances were public, we could just check it by the addresses.
+      //expect(await d.balances(expectedLineID,addr3.address)).to.equal(400);
+      //expect(await d.balances(expectedLineID,0)).to.equal(600);
+    });
+    it("Should revert with right message if arrays are not in same length", async () => {
+      await expect(
+        d.openLine(
+          2021,
+          token.address,
+          [owner.address, addr2.address, addr3.address],
+          [100, 200]
+        )
+      ).to.be.revertedWith("recievers and amounts array lengths should match");
+      await expect(
+        d.openLine(
+          2021,
+          token.address,
+          [addr2.address, addr3.address],
+          [100, 200, 300]
+        )
+      ).to.be.revertedWith("recievers and amounts array lengths should match");
+    });
+  });
+  describe("transferLine()", () => {
+    it("Should be able to use TransferLine & emit events", async () => {
+      d.openLine(
+        maturityDate,
+        token.address,
+        [owner.address, addr2.address, addr3.address],
+        [600, 200, 300]
+      );
+      expect(
+        await d.transferLine(
+          expectedLineID,
+          [addr2.address, addr3.address],
+          [100, 200]
+        )
+      )
+        .to.emit(d, "LineTransferred")
+        .withArgs(expectedLineID, addr2.address);
+
+      expect(
+        await d.transferLine(
+          expectedLineID,
+          [addr2.address, addr3.address],
+          [100, 200]
+        )
+      )
+        .to.emit(d, "LineTransferred")
+        .withArgs(expectedLineID, addr3.address);
+    });
+    it("Should revert with right message if arrays are not in same length", async () => {
+      d.openLine(2021, token.address, [owner.address], [600]);
+
+      await expect(
+        d.transferLine(
+          expectedLineID,
+          [addr2.address, addr3.address],
+          [100, 200, 300]
+        )
+      ).to.be.revertedWith("recievers and amounts array lengths should match");
+
+      await expect(
+        d.transferLine(
+          expectedLineID,
+          [owner.address, addr2.address, addr3.address],
+          [100, 200]
+        )
+      ).to.be.revertedWith("recievers and amounts array lengths should match");
+    });
+    it("Should revert if transferLine() caller doesn't have enough balance in its index", async () => {
+      d.openLine(2021, token.address, [owner.address], [300]);
+      await expect(
+        d.transferLine(
+          expectedLineID,
+          [addr2.address, addr3.address],
+          [200, 200]
+        )
+      ).to.be.revertedWith(
+        "Sender does not have the total amount to send to all"
+      );
+    });
+  });
+  describe("Issuer Issuing erc20Token & closeLine() & Withdraw by the reciever", () => {
+    it("closeLine() should revert if issuer didn't issue tokens to contract or didn't issued enough tokens", async () => {
+      await d.openLine(
+        maturityDate,
+        token.address,
+        [addr2.address, addr3.address],
+        [100, 200]
+      );
+      await expect(d.closeLine(maturityDate, token.address)).to.be.revertedWith(
+        "ERC20: transfer amount exceeds allowance"
+      );
+      await token.approve(d.address, 250);
+      await expect(d.closeLine(maturityDate, token.address)).to.be.revertedWith(
+        "ERC20: transfer amount exceeds allowance"
+      );
+    });
+    it("Close Line, D contract should have totalAmount of tokens transferred", async () => {
+      await d.openLine(
+        maturityDate,
+        token.address,
+        [owner.address, addr2.address, addr3.address],
+        [400, 100, 200]
+      );
+      await d.transferLine(
+        expectedLineID,
+        [addr2.address, addr3.address],
+        [100, 200]
+      );
+      await token.approve(d.address, 800); //Issuer is owner of the Token too so he has 1000 and gives 800 allowance to the D contract
+      expect(await d.closeLine(maturityDate, token.address)); //With closing, we only transfer 700 of allowance as total amount is 700
+      expect(await token.balanceOf(d.address)).equal(700);
+      expect(await token.balanceOf(owner.address)).equal(300);
+      //Someone else can't call the closeLine and close the right Line with lineID because it is generated with msg.sender
+    });
+    it("withdraw(), after function everybody gets right balances", async () => {
+      await d.openLine(
+        maturityDate,
+        token.address,
+        [owner.address, addr2.address, addr3.address],
+        [400, 100, 200]
+      );
+      await d.transferLine(
+        expectedLineID,
+        [addr2.address, addr3.address],
+        [100, 200]
+      );
+      await token.approve(d.address, 800);
+      expect(await d.closeLine(maturityDate, token.address));
+      expect(await token.balanceOf(d.address)).equal(700);
+      expect(await token.balanceOf(owner.address)).equal(300);
+
+      expect(await token.balanceOf(addr2.address)).to.equal(0);
+      expect(await token.balanceOf(addr3.address)).to.equal(0);
+      expect(
+        await d
+          .connect(addr2)
+          .withdraw(owner.address, maturityDate, token.address)
+      );
+      expect(await token.balanceOf(addr2.address)).to.equal(200);
+      expect(
+        await d
+          .connect(addr3)
+          .withdraw(owner.address, maturityDate, token.address)
+      );
+      expect(await token.balanceOf(addr3.address)).to.equal(400);
+      expect(await token.balanceOf(d.address)).to.equal(100);
+    });
+    it("Should Revert withdraw if reciever tries function with different parameters as newLineID would be empty, like unit(trying to withdraw different token)", async () => {
+      await d.openLine(
+        maturityDate,
+        token.address,
+        [owner.address, addr2.address, addr3.address],
+        [400, 100, 200]
+      );
+      await d.transferLine(
+        expectedLineID,
+        [addr2.address, addr3.address],
+        [100, 200]
+      );
+      await token.approve(d.address, 800);
+      await token2.approve(d.address, 900);
+      expect(await d.closeLine(maturityDate, token.address));
+      await expect(
+         d
+          .connect(addr3)
+          .withdraw(owner.address, maturityDate, token2.address)//different token
+      ).to.be.revertedWith("There is no balance for this user on this lineID Generated");
+      await expect(
+        d
+         .connect(addr3)
+         .withdraw(owner.address, 1000, token.address)
+     ).to.be.revertedWith("There is no balance for this user on this lineID Generated");
+    });
+  });
+});
