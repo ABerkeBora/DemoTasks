@@ -173,6 +173,7 @@ describe("Storage with Mapping", () => {
 describe("D Contract & Lines", () => {
   let D, d, Token, token, Token2, token2, owner, addr2, addr3, addr4;
   let maturityDate;
+  let expectedMaturityDate;
   let expectedLineID;
   beforeEach(async () => {
     D = await ethers.getContractFactory("D");
@@ -182,10 +183,14 @@ describe("D Contract & Lines", () => {
     Token2 = await ethers.getContractFactory("Token");
     token2 = await Token2.deploy();
     [owner, addr2, addr3, addr4] = await ethers.getSigners();
-    maturityDate = 2021;
+    maturityDate =
+      (2020 - 1970) * 365 * 24 * 60 * 60 + 60 * 60 * 9 + 60 * 35 + 48;
+    //Addition is there so we can test if rolling to midnight is functioning right I ignore the leap years as we dont really need to check it right now, we need to do it right on front end
+    //Using 2020 date so we can withdraw or else it wont let us withdraw because of the require condition
+    expectedMaturityDate = maturityDate - (maturityDate % (60 * 60 * 24));
     expectedLineID = ethers.utils.solidityKeccak256(
       ["uint256", "uint256", "uint256"],
-      [owner.address, maturityDate, token.address]
+      [owner.address, expectedMaturityDate, token.address]
     );
   });
 
@@ -220,7 +225,7 @@ describe("D Contract & Lines", () => {
     it("Should revert with right message if arrays are not in same length", async () => {
       await expect(
         d.openLine(
-          2021,
+          maturityDate,
           token.address,
           [owner.address, addr2.address, addr3.address],
           [100, 200]
@@ -228,12 +233,22 @@ describe("D Contract & Lines", () => {
       ).to.be.revertedWith("recievers and amounts array lengths should match");
       await expect(
         d.openLine(
-          2021,
+          maturityDate,
           token.address,
           [addr2.address, addr3.address],
           [100, 200, 300]
         )
       ).to.be.revertedWith("recievers and amounts array lengths should match");
+    });
+    it("Should revert with the right message if there is a zero address in reciever addresses.", async () => {
+      await expect(
+        d.openLine(
+          maturityDate,
+          token.address,
+          [owner.address, "0x0000000000000000000000000000000000000000"],
+          [100, 200]
+        )
+      ).to.be.revertedWith("Zero address can't recieve as it means burning");
     });
   });
   describe("transferLine()", () => {
@@ -265,7 +280,7 @@ describe("D Contract & Lines", () => {
         .withArgs(expectedLineID, addr3.address);
     });
     it("Should revert with right message if arrays are not in same length", async () => {
-      d.openLine(2021, token.address, [owner.address], [600]);
+      d.openLine(maturityDate, token.address, [owner.address], [600]);
 
       await expect(
         d.transferLine(
@@ -284,7 +299,7 @@ describe("D Contract & Lines", () => {
       ).to.be.revertedWith("recievers and amounts array lengths should match");
     });
     it("Should revert if transferLine() caller doesn't have enough balance in its index", async () => {
-      d.openLine(2021, token.address, [owner.address], [300]);
+      d.openLine(maturityDate, token.address, [owner.address], [300]);
       await expect(
         d.transferLine(
           expectedLineID,
@@ -294,6 +309,16 @@ describe("D Contract & Lines", () => {
       ).to.be.revertedWith(
         "Sender does not have the total amount to send to all"
       );
+    });
+    it("Should revert if there is zero address in the recievers", async () => {
+      d.openLine(maturityDate, token.address, [], []);
+      await expect(
+        d.transferLine(
+          expectedLineID,
+          ["0x0000000000000000000000000000000000000000", addr3.address],
+          [100, 100]
+        )
+      ).to.be.revertedWith("Zero address can't recieve as it means burning");
     });
   });
   describe("Issuer Issuing erc20Token & closeLine() & Withdraw by the reciever", () => {
@@ -379,15 +404,52 @@ describe("D Contract & Lines", () => {
       await token2.approve(d.address, 900);
       expect(await d.closeLine(maturityDate, token.address));
       await expect(
-         d
-          .connect(addr3)
-          .withdraw(owner.address, maturityDate, token2.address)//different token
-      ).to.be.revertedWith("There is no balance for this user on this lineID Generated");
+        d.connect(addr3).withdraw(owner.address, maturityDate, token2.address) //different token
+      ).to.be.revertedWith(
+        "There is no balance for this user on this lineID Generated"
+      );
       await expect(
-        d
-         .connect(addr3)
-         .withdraw(owner.address, 1000, token.address)
-     ).to.be.revertedWith("There is no balance for this user on this lineID Generated");
+        d.connect(addr3).withdraw(owner.address, 1000, token.address)
+      ).to.be.revertedWith(
+        "There is no balance for this user on this lineID Generated"
+      );
+    });
+
+    it("Should revert withdrawing if maturityDate has not come", async () => {
+      maturityDate =
+        (2022 - 1970) * 365 * 24 * 60 * 60 + 60 * 60 * 9 + 60 * 35 + 48; //Using a year that we haven't reached yet to see if it is going to revert, because of the timestamp usage this test might need to get updated
+      expectedMaturityDate = maturityDate - (maturityDate % (60 * 60 * 24));
+      expectedLineID = ethers.utils.solidityKeccak256(
+        ["uint256", "uint256", "uint256"],
+        [owner.address, expectedMaturityDate, token.address]
+      );
+      await d.openLine(
+        maturityDate,
+        token.address,
+        [owner.address, addr2.address, addr3.address],
+        [400, 100, 200]
+      );
+      await d.transferLine(
+        expectedLineID,
+        [addr2.address, addr3.address],
+        [100, 200]
+      );
+      await token.approve(d.address, 800);
+      expect(await d.closeLine(maturityDate, token.address));
+      expect(await token.balanceOf(d.address)).equal(700);
+      expect(await token.balanceOf(owner.address)).equal(300);
+
+      expect(await token.balanceOf(addr2.address)).to.equal(0);
+      expect(await token.balanceOf(addr3.address)).to.equal(0);
+      await expect(
+        d.connect(addr2).withdraw(owner.address, maturityDate, token.address)
+      ).to.be.revertedWith("Maturity Date is not up, you can't withdraw yet");
+      expect(await token.balanceOf(addr2.address)).to.equal(0);
+      await expect(
+        d.connect(addr3).withdraw(owner.address, maturityDate, token.address)
+      ).to.be.revertedWith("Maturity Date is not up, you can't withdraw yet");
+      expect(await token.balanceOf(addr3.address)).to.equal(0);
+      expect(await token.balanceOf(d.address)).to.equal(700);
     });
   });
 });
