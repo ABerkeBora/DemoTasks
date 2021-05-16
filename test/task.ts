@@ -250,6 +250,16 @@ describe("D Contract & Lines", () => {
         )
       ).to.be.revertedWith("Zero address can't recieve as it means burning");
     });
+    it("Should revert with the right message if one of the amounts sent are zero", async () => {
+      await expect(
+        d.openLine(
+          maturityDate,
+          token.address,
+          [owner.address, addr2.address],
+          [100, 0]
+        )
+      ).to.be.revertedWith("Sending 0 amount to an reciever is not allowed");
+    });
   });
   describe("transferLine()", () => {
     it("Should be able to use TransferLine & emit events", async () => {
@@ -319,6 +329,16 @@ describe("D Contract & Lines", () => {
           [100, 100]
         )
       ).to.be.revertedWith("Zero address can't recieve as it means burning");
+    });
+    it("Should revert with the right message if one of the amounts sent are zero", async () => {
+      d.openLine(maturityDate, token.address, [], []);
+      await expect(
+        d.transferLine(
+          expectedLineID,
+          [addr2.address, addr3.address],
+          [0, 100]
+        )
+      ).to.be.revertedWith("Sending 0 amount to an reciever is not allowed");
     });
   });
   describe("Issuer Issuing erc20Token & closeLine() & Withdraw by the reciever", () => {
@@ -450,6 +470,51 @@ describe("D Contract & Lines", () => {
       ).to.be.revertedWith("Maturity Date is not up, you can't withdraw yet");
       expect(await token.balanceOf(addr3.address)).to.equal(0);
       expect(await token.balanceOf(d.address)).to.equal(700);
+    });
+
+    it("Should revert openLine() or transferLine() functions if closeLine() is called for that lineId", async () => {
+      await d.openLine(
+        maturityDate,
+        token.address,
+        [owner.address, addr2.address, addr3.address],
+        [400, 100, 200]
+      );
+      await d.transferLine(
+        expectedLineID,
+        [addr2.address, addr3.address],
+        [100, 200]
+      );
+      await token.approve(d.address, 800);
+      expect(await d.closeLine(maturityDate, token.address));
+      expect(await token.balanceOf(d.address)).equal(700);
+      expect(await token.balanceOf(owner.address)).equal(300);
+
+      expect(await token.balanceOf(addr2.address)).to.equal(0);
+      expect(await token.balanceOf(addr3.address)).to.equal(0);
+      expect(
+        await d
+          .connect(addr2)
+          .withdraw(owner.address, maturityDate, token.address)
+      );
+      expect(await token.balanceOf(addr2.address)).to.equal(200);
+      expect(
+        await d
+          .connect(addr3)
+          .withdraw(owner.address, maturityDate, token.address)
+      );
+      expect(await token.balanceOf(addr3.address)).to.equal(400);
+      expect(await token.balanceOf(d.address)).to.equal(100);
+      await expect(d.openLine(
+        maturityDate,
+        token.address,
+        [owner.address, addr3.address],
+        [100, 200]
+      )).to.be.revertedWith("Line is Closed and can't transfer anything anymore, try to have another maturity date, address issuing combination");
+      await expect(d.transferLine(
+        expectedLineID,
+        [addr2.address, addr3.address],
+        [25, 25]
+      )).to.be.revertedWith("Line is Closed and can't transfer anything anymore");
     });
   });
 });

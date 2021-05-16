@@ -31,7 +31,7 @@ contract D {
             "recievers and amounts array lengths should match"
         );
 
-         maturityDate -= maturityDate % (60 * 60 * 24);// to get rid of seconds, minutes & hours, because of leap seconds it might be off by 26 seconds, negligible for sure.
+        maturityDate -= maturityDate % (60 * 60 * 24); // to get rid of seconds, minutes & hours, because of leap seconds it might be off by 26 seconds, negligible for sure.
         //maturityDate = (maturityDate / (60 * 60 * 24)) * (60 * 60 * 24); Another way to do this. Not sure which one is more efficient
         //Should I revert if it is older date? For the sake of testing keeping like that is much easier btw
 
@@ -39,7 +39,7 @@ contract D {
 
         require(
             !isClosed[lineID],
-            "Line is Closed can't transfer anything anymore, try to have another maturity date, address issuing combination"
+            "Line is Closed and can't transfer anything anymore, try to have another maturity date, address issuing combination"
         );
         for (uint256 i = 0; i < recievers.length; i++) {
             _openLineProvide(lineID, recievers[i], amounts[i]);
@@ -51,6 +51,7 @@ contract D {
         address reciever,
         uint256 amount
     ) internal {
+        require(amount != 0, "Sending 0 amount to an reciever is not allowed");
         require(
             reciever != address(0),
             "Zero address can't recieve as it means burning"
@@ -69,6 +70,10 @@ contract D {
             recievers.length == amounts.length,
             "recievers and amounts array lengths should match"
         );
+        require(
+            !isClosed[lineID],
+            "Line is Closed and can't transfer anything anymore"
+        );
 
         for (uint256 i = 0; i < recievers.length; i++) {
             _transferLine(lineID, recievers[i], amounts[i]);
@@ -84,14 +89,12 @@ contract D {
             reciever != address(0),
             "Zero address can't recieve as it means burning"
         );
+        require(amount != 0, "Sending 0 amount to an reciever is not allowed");
         require(
             balances[lineID][msg.sender] >= amount,
             "Sender does not have the total amount to send to all"
         );
-        require(
-            !isClosed[lineID],
-            "Line is Closed can't transfer anything anymore"
-        );
+
         balances[lineID][reciever] += amount;
         balances[lineID][msg.sender] -= amount;
         emit LineTransferred(lineID, reciever); //Should we emit the sender too? Not sure how we are going to observe those, might be unneccesary don't know.
@@ -112,7 +115,10 @@ contract D {
         address unit
     ) public {
         maturityDate = (maturityDate / (60 * 60 * 24)) * (60 * 60 * 24);
-        require(maturityDate <= block.timestamp,"Maturity Date is not up, you can't withdraw yet");
+        require(
+            maturityDate <= block.timestamp,
+            "Maturity Date is not up, you can't withdraw yet"
+        );
         bytes32 lineID = keccak256(abi.encode(issuer, maturityDate, unit));
         uint256 amountToBePaid = balances[lineID][msg.sender];
         require(
